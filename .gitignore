@@ -5,3 +5,6 @@ Assignment_5/buildRelease/*
 */build
 */buildRelease
 .idea
+*/report.md
+*/report.pdf
+*/cmake-build-debug
