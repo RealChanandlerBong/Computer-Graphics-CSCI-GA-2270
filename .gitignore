@@ -2,9 +2,9 @@ Assignment_5/build/*
 Assignment_5/buildRelease/*
 .vscode/*
 .DS_Store
-*/build
 */buildRelease
 .idea
 */report.md
 */report.pdf
 */cmake-build-debug
+*/build*/*
