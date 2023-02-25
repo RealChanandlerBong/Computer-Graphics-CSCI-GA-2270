@@ -199,17 +199,23 @@ double ray_sphere_intersection(const Vector3d &ray_origin, const Vector3d &ray_d
     const Vector3d sphere_center = sphere_centers[index];
     const double sphere_radius = sphere_radii[index];
 
+    const Vector3d EC = ray_origin - sphere_center;
+    const double A = ray_direction.squaredNorm();
+    const double B = 2 * ray_direction.transpose() * EC;
+    const double C = EC.squaredNorm() - sphere_radius*sphere_radius;
+    const double delta = B*B - 4*A*C;
     double t = -1;
 
-    if (false)
+    if (delta < 0.)
     {
         return -1;
     }
     else
     {
+        t = (-1*B - sqrt(delta)) / (2*A);
         //TODO set the correct intersection point, update p to the correct value
-        p = ray_origin;
-        N = ray_direction;
+        p = ray_origin + t*ray_direction;
+        N = (p - sphere_center).normalized();
 
         return t;
     }
@@ -229,16 +235,28 @@ double ray_parallelogram_intersection(const Vector3d &ray_origin, const Vector3d
     const Vector3d pgram_u = A - pgram_origin;
     const Vector3d pgram_v = B - pgram_origin;
 
-    if (false)
+    const Vector3d b = ray_origin - pgram_origin;
+    Matrix3d M;
+    M << pgram_u(0), pgram_v(0), -1*ray_direction(0),
+            pgram_u(1), pgram_v(1), -1*ray_direction(1),
+            pgram_u(2), pgram_v(2), -1*ray_direction(2);
+    Vector3d x = M.fullPivLu().solve(b);
+
+    if ((M*x-b).norm() / b.norm() > exp(-8) ||
+            (x(0) <= 0 || x(0) >= 1 || x(1) <= 0 || x(1) >= 1) )
     {
         return -1;
     }
 
     //TODO set the correct intersection point, update p and N to the correct values
-    p = ray_origin;
-    N = p.normalized();
+    double t = x(2);
+    p = ray_origin + t*ray_direction;
+    N = pgram_u.cross(pgram_v).normalized();
+    if (N.dot(ray_direction) < 0.) {
+        N = -1*N;
+    }
 
-    return -1;
+    return t;
 }
 
 //Finds the closest intersecting object returns its index
@@ -395,7 +413,8 @@ void raytrace_scene()
     // The sensor grid is at a distance 'focal_length' from the camera center,
     // and covers an viewing angle given by 'field_of_view'.
     double aspect_ratio = double(w) / double(h);
-    double image_y = 1; //TODO: compute the correct pixels size
+//    double image_y = focal_length * tan(field_of_view / 2); //TODO: compute the correct pixels size
+    double image_y = 1;
     double image_x = 1; //TODO: compute the correct pixels size
 
     // The pixel grid through which we shoot rays is at a distance 'focal_length'
