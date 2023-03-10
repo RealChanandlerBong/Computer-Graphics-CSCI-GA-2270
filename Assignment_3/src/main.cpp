@@ -25,7 +25,7 @@ const std::string filename("raytrace.png");
 const double focal_length = 10;
 const double field_of_view = 0.7854; //45 degrees
 const double image_z = 5;
-const bool is_perspective = false;
+const bool is_perspective = true;
 const Vector3d camera_position(0, 0, 5);
 
 //Maximum number of recursive calls
@@ -130,7 +130,8 @@ double lerp(double a0, double a1, double w)
     assert(w >= 0);
     assert(w <= 1);
     //TODO implement linear and cubic interpolation
-    return 0;
+//    return (1.0-w)*a0 + w*a1;
+    return (a1-a0) * (3.0-w*2.0) * w * w + a0;
 }
 
 // Computes the dot product of the distance and gradient vectors.
@@ -138,16 +139,20 @@ double dotGridGradient(int ix, int iy, double x, double y)
 {
     //TODO: Compute the distance vector
     //TODO: Compute and return the dot-product
-    return 0;
+    Vector2d dist;
+    dist(0) = x - (double)ix;
+    dist(1) = y - (double)iy;
+
+    return dist.dot(grid[iy][ix]);
 }
 
 // Compute Perlin noise at coordinates x, y
 double perlin(double x, double y)
 {
     //TODO: Determine grid cell coordinates x0, y0
-    int x0 = 0;
+    int x0 = int(x);
     int x1 = x0 + 1;
-    int y0 = 0;
+    int y0 = int(y);
     int y1 = y0 + 1;
 
     // Determine interpolation weights
@@ -178,12 +183,12 @@ Vector4d procedural_texture(const double tu, const double tv)
     assert(tv <= 1);
 
     //TODO: uncomment these lines once you implement the perlin noise
-    // const double color = (perlin(tu * grid_size, tv * grid_size) + 1) / 2;
-    // return Vector4d(0, color, 0, 0);
+     const double color = (perlin(tu * grid_size, tv * grid_size) + 1) / 2;
+     return Vector4d(0, color, 0, 0);
 
     //Example for checkerboard texture
-    const double color = (int(tu * grid_size) + int(tv * grid_size)) % 2 == 0 ? 0 : 1;
-    return Vector4d(0, color, 0, 0);
+//    const double color = (int(tu * grid_size) + int(tv * grid_size)) % 2 == 0 ? 0 : 1;
+//    return Vector4d(0, color, 0, 0);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -252,7 +257,7 @@ double ray_parallelogram_intersection(const Vector3d &ray_origin, const Vector3d
     double t = x(2);
     p = ray_origin + t*ray_direction;
     N = pgram_u.cross(pgram_v).normalized();
-    if (N.dot(ray_direction) < 0.) {
+    if (N.dot(ray_direction) > 0.) {
         N = -1*N;
     }
 
@@ -317,7 +322,13 @@ bool is_light_visible(const Vector3d &ray_origin, const Vector3d &ray_direction,
 {
     // TODO: Determine if the light is visible here
     // Use find_nearest_object
-    return true;
+    Vector3d p, N;
+    const int nearest_object = find_nearest_object(ray_origin, ray_direction, p, N);
+    if (nearest_object < 0) {
+        return true;
+    }
+    const double product = (light_position-ray_origin).dot(light_position-p);
+    return product < 0;
 }
 
 Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, int max_bounce)
@@ -346,6 +357,12 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
         const Vector3d Li = (light_position - p).normalized();
 
         // TODO: Shoot a shadow ray to determine if the light should affect the intersection point and call is_light_visible
+        const Vector3d shadow_ray_direction = light_position - p;
+        const Vector3d shadow_ray_origin = p + exp(-8)*shadow_ray_direction.normalized();
+        if (!is_light_visible(shadow_ray_origin, shadow_ray_direction, light_position))
+        {
+            continue;
+        }
 
         Vector4d diff_color = obj_diffuse_color;
 
@@ -361,13 +378,15 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
             diff_color = procedural_texture(tu, tv);
         }
 
-        // TODO: Add shading parameters
+        // TODO: Add shading parameters // done
 
         // Diffuse contribution
         const Vector4d diffuse = diff_color * std::max(Li.dot(N), 0.0);
 
         // Specular contribution, use obj_specular_color
-        const Vector4d specular(0, 0, 0, 0);
+        const Vector3d v = -1*ray_direction.normalized();
+        const Vector3d h = (v+Li) / (v+Li).norm();
+        const Vector4d specular = obj_specular_color * pow(std::max(h.dot(N), 0.0), obj_specular_exponent);
 
         // Attenuate lights according to the squared distance to the lights
         const Vector3d D = light_position - p;
@@ -382,6 +401,12 @@ Vector4d shoot_ray(const Vector3d &ray_origin, const Vector3d &ray_direction, in
     // TODO: Compute the color of the reflected ray and add its contribution to the current point color.
     // use refl_color
     Vector4d reflection_color(0, 0, 0, 0);
+    Vector3d refl_direction = ray_direction - 2*N*(N.dot(ray_direction));
+    Vector3d refl_origin = p + exp(-8)*refl_direction;
+    if (max_bounce > 0) {
+        reflection_color = shoot_ray(refl_origin, refl_direction, max_bounce-1);
+        reflection_color = refl_color.cwiseProduct(reflection_color);
+    }
 
     // TODO: Compute the color of the refracted ray and add its contribution to the current point color.
     //       Make sure to check for total internal reflection before shooting a new ray.
@@ -413,9 +438,8 @@ void raytrace_scene()
     // The sensor grid is at a distance 'focal_length' from the camera center,
     // and covers an viewing angle given by 'field_of_view'.
     double aspect_ratio = double(w) / double(h);
-//    double image_y = focal_length * tan(field_of_view / 2); //TODO: compute the correct pixels size
-    double image_y = 1;
-    double image_x = 1; //TODO: compute the correct pixels size
+    double image_y = focal_length * tan(field_of_view / 2); //TODO: compute the correct pixels size
+    double image_x = image_y * w / h; //TODO: compute the correct pixels size
 
     // The pixel grid through which we shoot rays is at a distance 'focal_length'
     const Vector3d image_origin(-image_x, image_y, -image_z);
@@ -436,6 +460,8 @@ void raytrace_scene()
             if (is_perspective)
             {
                 // TODO: Perspective camera
+                ray_origin = camera_position;
+                ray_direction = pixel_center - ray_origin;
             }
             else
             {
