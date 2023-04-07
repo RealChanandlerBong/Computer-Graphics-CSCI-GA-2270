@@ -32,6 +32,7 @@ public:
         int left;     // Index of the left child (-1 for a leaf)
         int right;    // Index of the right child (-1 for a leaf)
         int triangle; // Index of the node triangle (-1 for internal nodes)
+        int index;    // Index of itself
     };
 
     std::vector<Node> nodes;
@@ -39,6 +40,8 @@ public:
 
     AABBTree() = default;                           // Default empty constructor
     AABBTree(const MatrixXd &V, const MatrixXi &F); // Build a BVH from an existing mesh
+
+    Node buildTree(const MatrixXd &V, const MatrixXi &F, const MatrixXd &centroids, std::vector<int> &ids, int l, int r);
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -46,7 +49,8 @@ public:
 ////////////////////////////////////////////////////////////////////////////////
 const std::string data_dir = DATA_DIR;
 const std::string filename("raytrace.png");
-const std::string mesh_filename(data_dir + "dodeca.off");
+//const std::string mesh_filename(data_dir + "dragon.off");
+const std::string mesh_filename(data_dir + "bunny.off");
 
 //Camera settings
 const double focal_length = 2;
@@ -137,6 +141,73 @@ AlignedBox3d bbox_from_triangle(const Vector3d &a, const Vector3d &b, const Vect
     return box;
 }
 
+AABBTree::Node AABBTree::buildTree(const MatrixXd &V, const MatrixXi &F, const MatrixXd &centroids, std::vector<int> &ids, int l, int r) {
+    const int total = r-l+1;
+    if (total == 1) {
+        // return the leaf node
+        Node leaf {
+            AlignedBox3d(),
+            -1,
+            -1,
+            -1,
+            ids.at(r),
+            static_cast<int>(nodes.size()),
+        };
+        const Vector3d a = V.row(F(ids.at(r), 0));
+        const Vector3d b = V.row(F(ids.at(r), 1));
+        const Vector3d c = V.row(F(ids.at(r), 2));
+        leaf.bbox.extend(bbox_from_triangle(a, b, c));
+        nodes.emplace_back(leaf);
+        return leaf;
+    }
+
+    // find the longest axis
+    AlignedBox3d box;
+    for (int i = l; i <= r; ++i) {
+        const Vector3d a = V.row(F(ids.at(i), 0));
+        const Vector3d b = V.row(F(ids.at(i), 1));
+        const Vector3d c = V.row(F(ids.at(i), 2));
+        box.extend(bbox_from_triangle(a, b, c));
+    }
+    int max_axis = -1;
+    double max_length = std::numeric_limits<double>::min();
+    const Vector3d axis_length = box.max() - box.min();
+    for (int i = 0; i < box.dim(); ++i) {
+        if (axis_length(i) > max_length) {
+            max_length = axis_length(i);
+            max_axis = i;
+        }
+    }
+
+    // sort by selecting smallest
+    std::sort(std::next(ids.begin(), l), std::next(ids.begin(), r), [&](const int a, const int b) {
+        return centroids(ids.at(a), max_axis) < centroids(ids.at(b), max_axis);
+    });
+
+    // split
+    const int size1 = total / 2;
+    const int size2 = total - size1;
+
+    // recursive call
+    Node left = buildTree(V, F, centroids, ids, l, l+size1-1);
+    Node right = buildTree(V, F, centroids, ids, l+size1, r);
+
+    // build current node
+    Node cur {
+        AlignedBox3d(),
+        -1,
+        left.index,
+        right.index,
+        -1,
+        static_cast<int>(nodes.size()),
+    };
+    cur.bbox.extend(left.bbox);
+    cur.bbox.extend(right.bbox);
+    nodes.emplace_back(cur);
+
+    return cur;
+}
+
 AABBTree::AABBTree(const MatrixXd &V, const MatrixXi &F)
 {
     // Compute the centroids of all the triangles in the input mesh
@@ -155,6 +226,73 @@ AABBTree::AABBTree(const MatrixXd &V, const MatrixXi &F)
 
     // Split each set of primitives into 2 sets of roughly equal size,
     // based on sorting the centroids along one direction or another.
+
+    // method (1): top down
+    std::vector<int> ids;
+    for (int i = 0; i < F.rows(); ++i) {
+        ids.emplace_back(i);
+    }
+    Node root_node = buildTree(V, F, centroids, ids, 0, F.rows()-1);
+    root = root_node.index;
+
+    // method (2): bottom up
+//    std::vector<Node> S;
+//    for (int i = 0; i < F.rows(); ++i) {
+//        Node node {
+//            AlignedBox3d(),
+//            -1,
+//            -1,
+//            -1,
+//            i,
+//            i,
+//        };
+//        for (int j = 0; j < F.cols(); j++) {
+//            VectorXd triangle = V.row(F(i, j));
+//            node.bbox.extend(triangle);
+//        }
+//        nodes.push_back(node);
+//        S.push_back(node);
+//    }
+//    int nodes_size = nodes.size(), S_size = S.size();
+//    const double double_max = std::numeric_limits<double>::max();
+//
+//    while (S_size > 1) {
+//        double min_cost = double_max;
+//        int min_i = -1, min_j = -1;
+//        for (int i = 0; i < S_size; ++i) {
+//            Node node1 = S.at(i);
+//            for (int j = i+1; j < S_size; ++j) {
+//                Node node2 = S.at(j);
+//                double cost = (node1.bbox.center()-node2.bbox.center()).norm();
+//                if (cost < min_cost) {
+//                    min_cost = cost;
+//                    min_i = i;
+//                    min_j = j;
+//                }
+//            }
+//        }
+//        Node node {
+//            AlignedBox3d(),
+//            -1,
+//            S.at(min_i).index,
+//            S.at(min_j).index,
+//            -1,
+//            nodes_size,
+//        };
+//        node.bbox.extend(nodes.at(S.at(min_i).index).bbox);
+//        node.bbox.extend(nodes.at(S.at(min_j).index).bbox);
+//        nodes.at(S.at(min_i).index).parent = nodes_size;
+//        nodes.at(S.at(min_j).index).parent = nodes_size;
+//        nodes.push_back(node);
+//        nodes_size = nodes.size();
+//
+//        S.erase(std::next(S.begin(), min_j));
+//        S.erase(std::next(S.begin(), min_i));
+//        S.push_back(node);
+//        S_size = S.size();
+//    }
+//
+//    root = nodes_size - 1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -166,8 +304,27 @@ double ray_triangle_intersection(const Vector3d &ray_origin, const Vector3d &ray
     // TODO
     // Compute whether the ray intersects the given triangle.
     // If you have done the parallelogram case, this should be very similar to it.
-
-    return -1;
+    const Vector3d ab = b - a, ac = c - a;
+    const Vector3d m = ray_origin - a;
+    Matrix3d M;
+    M << ab, ac, ray_direction;
+    const Vector3d x = M.fullPivLu().solve(m);
+    p = ray_origin - x(2)*ray_direction;
+    if ((M*x-m).norm() / m.norm() > exp(-6)) {
+        return -1;
+    }
+    Matrix3d abc;
+    abc << a, b, c;
+    const Vector3d y = abc.fullPivLu().solve(p);
+    if ((abc*y - p).norm() / p.norm() > exp(-6) ||
+            y(0) < 0. || y(0) > 1. || y(1) < 0. || y(1) > 1. || y(2) < 0. || y(2) > 1.) {
+        return -1;
+    }
+    N = ab.cross(ac).normalized();
+    if (N.dot(ray_direction) > 0.) {
+        N = -1*N;
+    }
+    return -1*x(2);
 }
 
 bool ray_box_intersection(const Vector3d &ray_origin, const Vector3d &ray_direction, const AlignedBox3d &box)
@@ -175,7 +332,66 @@ bool ray_box_intersection(const Vector3d &ray_origin, const Vector3d &ray_direct
     // TODO
     // Compute whether the ray intersects the given box.
     // we are not testing with the real surface here anyway.
-    return false;
+    if (box.contains(ray_origin)) {
+        return true;
+    }
+
+    const Vector3d& p1 = box.min();
+    const Vector3d& p2 = box.max();
+
+    // method (1): compute intersections with 6 faces
+//    const Vector3d t1 = (p1-ray_origin).array() / ray_direction.array();
+//    const Vector3d t2 = (p2-ray_origin).array() / ray_direction.array();
+//
+//    if (t1(0) < 0. && t1(1) < 0. && t1(2) < 0.) {
+//        return false;
+//    }
+//    if (t2(0) < 0. && t2(1) < 0. && t2(2) < 0.) {
+//        return false;
+//    }
+//
+//    const Vector3d px1 = ray_origin + t1(0)*ray_direction;
+//    if (t1(0) > 0. && (px1(1)-p1(1))*(px1(1)-p2(1)) <= 0. && (px1(2)-p1(2))*(px1(2)-p2(2)) <= 0.) {
+//        return true;
+//    }
+//    const Vector3d px2 = ray_origin + t2(0)*ray_direction;
+//    if (t2(0) > 0. && (px2(1)-p1(1))*(px2(1)-p2(1)) <= 0. && (px2(2)-p1(2))*(px2(2)-p2(2)) <= 0.) {
+//        return true;
+//    }
+//
+//    const Vector3d py1 = ray_origin + t1(1)*ray_direction;
+//    if (t1(1) > 0. && (py1(0)-p1(0))*(py1(0)-p2(0)) <= 0. && (py1(2)-p1(2))*(py1(2)-p2(2)) <= 0.) {
+//        return true;
+//    }
+//    const Vector3d py2 = ray_origin + t2(1)*ray_direction;
+//    if (t2(1) > 0. && (py2(0)-p1(0))*(py2(0)-p2(0)) <= 0. && (py2(2)-p1(2))*(py2(2)-p2(2)) <= 0.) {
+//        return true;
+//    }
+//
+//    const Vector3d pz1 = ray_origin + t1(2)*ray_direction;
+//    if (t1(2) > 0. && (pz1(0)-p1(0))*(pz1(0)-p2(0)) <= 0. && (pz1(1)-p1(1))*(pz1(1)-p2(1)) <= 0.) {
+//        return true;
+//    }
+//    const Vector3d pz2 = ray_origin + t2(2)*ray_direction;
+//    if (t2(2) > 0. && (pz2(0)-p1(0))*(pz2(0)-p2(0)) <= 0. && (pz2(1)-p1(1))*(pz2(1)-p2(1)) <= 0.) {
+//        return true;
+//    }
+
+    // method (2): compute the clip
+    const Vector3d dir_frac = Vector3d(1,1,1).array() / ray_direction.array();
+    const Vector3d t1 = (p1-ray_origin).cwiseProduct(dir_frac);
+    const Vector3d t2 = (p2-ray_origin).cwiseProduct(dir_frac);
+
+    const double t_min = std::max(std::max(std::min(t1(0),t2(0)), std::min(t1(1),t2(1))), std::min(t1(2),t2(2)));
+    const double t_max = std::min(std::min(std::max(t1(0),t2(0)), std::max(t1(1),t2(1))), std::max(t1(2),t2(2)));
+
+    if (t_max < 0.) {
+        return false;
+    }
+    if (t_min > t_max) {
+        return false;
+    }
+    return true;
 }
 
 //Finds the closest intersecting object returns its index
@@ -188,8 +404,69 @@ bool find_nearest_object(const Vector3d &ray_origin, const Vector3d &ray_directi
     // Method (1): Traverse every triangle and return the closest hit.
     // Method (2): Traverse the BVH tree and test the intersection with a
     // triangles at the leaf nodes that intersects the input ray.
+    int closet_index = -1;
+    double closest_t = std::numeric_limits<double>::max(); //closest t is "+ infinity"
 
-    return false;
+    // Method (1)
+//    for (int i = 0; i < facets.rows(); ++i) {
+//        Vector3i facet;
+//        facet << facets.row(i)(0), facets.row(i)(1), facets.row(i)(2);
+//        Vector3d a, b, c;
+//        a << vertices.row(facet(0))(0), vertices.row(facet(0))(1),vertices.row(facet(0))(2);
+//        b << vertices.row(facet(1))(0), vertices.row(facet(1))(1), vertices.row(facet(1))(2);
+//        c << vertices.row(facet(2))(0), vertices.row(facet(2))(1), vertices.row(facet(2))(2);
+//
+//        const double t = ray_triangle_intersection(ray_origin, ray_direction, a, b, c, tmp_p, tmp_N);
+//        if (t > 0.) {
+//            if (t < closest_t) {
+//                closet_index = i;
+//                closest_t = t;
+//                p = tmp_p;
+//                N = tmp_N;
+//            }
+//        }
+//    }
+
+    // Method (2)
+    const int root = bvh.root;
+    if (!ray_box_intersection(ray_origin, ray_direction, bvh.nodes.at(root).bbox)) {
+        return false;
+    }
+    std::deque<int> queue;
+    queue.emplace_back(root);
+    while (!queue.empty()) {
+        AABBTree::Node cur = bvh.nodes.at(queue.front());
+        queue.pop_front();
+        if (cur.left == -1 || cur.right == -1) { // leaf node
+            assert(cur.triangle != -1);
+            Vector3i facet;
+            facet << facets.row(cur.triangle)(0), facets.row(cur.triangle)(1), facets.row(cur.triangle)(2);
+            Vector3d a, b, c;
+            a = vertices.row(facet(0));
+            b = vertices.row(facet(1));
+            c = vertices.row(facet(2));
+            const double t = ray_triangle_intersection(ray_origin, ray_direction, a, b, c, tmp_p, tmp_N);
+            if (t > 0. && t < closest_t) {
+                closet_index = cur.triangle;
+                closest_t = t;
+                p = tmp_p;
+                N = tmp_N;
+            }
+        } else if (cur.triangle == -1) { // internal node
+            assert(cur.left != -1);
+            assert(cur.right != -1);
+            AABBTree::Node left = bvh.nodes.at(cur.left);
+            AABBTree::Node right = bvh.nodes.at(cur.right);
+            if (ray_box_intersection(ray_origin, ray_direction, left.bbox)) {
+                queue.emplace_back(cur.left);
+            }
+            if (ray_box_intersection(ray_origin, ray_direction, right.bbox)) {
+                queue.emplace_back(cur.right);
+            }
+        }
+    }
+
+    return closet_index != -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -262,8 +539,8 @@ void raytrace_scene()
     // and covers an viewing angle given by 'field_of_view'.
     double aspect_ratio = double(w) / double(h);
     //TODO
-    double image_y = 1;
-    double image_x = 1;
+    double image_y = focal_length * tan(field_of_view/2);
+    double image_x = image_y * aspect_ratio;
 
     // The pixel grid through which we shoot rays is at a distance 'focal_length'
     const Vector3d image_origin(-image_x, image_y, camera_position[2] - focal_length);
@@ -309,8 +586,12 @@ void raytrace_scene()
 
 int main(int argc, char *argv[])
 {
+    auto start = std::chrono::steady_clock::now();
     setup_scene();
 
     raytrace_scene();
+    auto end = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(end - start);
+    std::cout << "Total time: " << duration.count() << "s" << std::endl;
     return 0;
 }

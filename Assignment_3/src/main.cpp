@@ -61,7 +61,7 @@ void setup_scene()
 {
     camera_positions.resize(position_size + 1);
     for (int i = 0; i < position_size; ++i) {
-        const Vector2d temp = Vector2d::Random().normalized() / 50;
+        const Vector2d temp = Vector2d::Random().normalized() / 100;
         camera_positions.at(i) = Vector3d(temp(0), temp(1), 5);
     }
     camera_positions.at(position_size) = Vector3d(0, 0, 5);
@@ -251,9 +251,7 @@ double ray_parallelogram_intersection(const Vector3d &ray_origin, const Vector3d
 
     const Vector3d b = ray_origin - pgram_origin;
     Matrix3d M;
-    M << pgram_u(0), pgram_v(0), -1*ray_direction(0),
-            pgram_u(1), pgram_v(1), -1*ray_direction(1),
-            pgram_u(2), pgram_v(2), -1*ray_direction(2);
+    M << pgram_u, pgram_v, -1*ray_direction;
     Vector3d x = M.fullPivLu().solve(b);
 
     if ((M*x-b).norm() / b.norm() > exp(-8) ||
