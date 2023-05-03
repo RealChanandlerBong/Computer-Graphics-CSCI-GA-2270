@@ -8,3 +8,4 @@ Assignment_5/buildRelease/*
 */report.pdf
 */cmake-build-debug
 */build*/*
+/ext/SDL/debian/*
