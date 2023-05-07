@@ -7,5 +7,9 @@ Assignment_5/buildRelease/*
 */report.md
 */report.pdf
 */cmake-build-debug
+*/cmake-build-release
 */build*/*
 /ext/SDL/debian/*
+/build/*
+/cmake-build-debug/*
+/cmake-build-release/*
