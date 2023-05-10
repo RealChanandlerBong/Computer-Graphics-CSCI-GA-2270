@@ -9,6 +9,7 @@ class VertexAttributes
 	{
 		position << x,y,z,w;
 		color << 1,1,1,1;
+        M = Eigen::Matrix4d::Identity();
 	}
 
     // Interpolates the vertex attributes
@@ -29,6 +30,7 @@ class VertexAttributes
 
 	Eigen::Vector4d position;
 	Eigen::Vector4d color;
+    Eigen::Matrix4d M;
 };
 
 class FragmentAttributes
@@ -56,4 +58,9 @@ class FrameBufferAttributes
 class UniformAttributes
 {
 	public:
+    UniformAttributes() {
+        view_M = Eigen::Matrix4d::Identity();
+    }
+
+    Eigen::Matrix4d view_M;
 };
